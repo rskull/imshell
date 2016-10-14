@@ -5,7 +5,7 @@ Display an image on the terminal.
 ## Install
 
 ```
-$ go get -u https://github.com/rskull/imshell
+$ go get -u github.com/rskull/imshell
 ```
 
 ## Usage
