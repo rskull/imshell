@@ -5,7 +5,15 @@ Display an image on the terminal.
 ## Install
 
 ```
-$ go get -u github.com/rskull/imshell
+$ go get -u github.com/rskull/imshell/...
+```
+
+## Build from source code
+
+```
+$ go get -u github.com/Masterminds/glide
+$ make bundle
+$ make
 ```
 
 ## Usage
@@ -21,7 +29,7 @@ Usage of ./bin/imshell:
         output width (default 50)
 ```
 
-## example
+## Example
 
 ```
 $ imshell -i icon.png -w 30
