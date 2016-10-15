@@ -1,6 +1,6 @@
 # imshell
 
-Display an image on the terminal.
+Displaying an image on the terminal.
 
 ## Install
 
