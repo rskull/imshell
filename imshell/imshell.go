@@ -361,6 +361,7 @@ func createDict() map[string]string {
 }
 
 func Convert(imagePath, replaceText string, width float64) (string, error) {
+	ch, stop := make(chan string), make(chan error)
 	var buffer string
 
 	imtext := NewImageText(replaceText)
@@ -389,33 +390,46 @@ func Convert(imagePath, replaceText string, width float64) (string, error) {
 	iterator := originalImage.NewPixelIterator()
 	defer iterator.Destroy()
 
+	var wg sync.WaitGroup
+
 	for y := 0; y < int(height); y++ {
 
-		pixels := iterator.GetNextIteratorRow()
-		if len(pixels) == 0 {
-			break
-		}
+		go func() {
 
-		for _, pixel := range pixels {
-			if !pixel.IsVerified() {
-				return "", fmt.Errorf("convert error: %s", "unverified pixel")
+			pixels := iterator.GetNextIteratorRow()
+			if len(pixels) == 0 {
+				stop <- fmt.Errorf("convert error: %s", "unverified pixel")
 			}
-			r := (uint8)(255 * pixel.GetRed())
-			g := (uint8)(255 * pixel.GetGreen())
-			b := (uint8)(255 * pixel.GetBlue())
-			short := RGBToShort(r, g, b)
 
-			if replaceText == "" {
-				buffer += fmt.Sprintf("\x1b[48;05;%sm  \x1b[0m", short)
-			} else {
-				buffer += fmt.Sprintf("\x1b[38;05;%sm%s\x1b[0m", short, imtext.GetText())
+			for _, pixel := range pixels {
+				if !pixel.IsVerified() {
+					stop <- fmt.Errorf("convert error: %s", "unverified pixel")
+				}
+				r := (uint8)(255 * pixel.GetRed())
+				g := (uint8)(255 * pixel.GetGreen())
+				b := (uint8)(255 * pixel.GetBlue())
+				short := RGBToShort(r, g, b)
+
+				if replaceText == "" {
+					ch <- fmt.Sprintf("\x1b[48;05;%sm  \x1b[0m", short)
+				} else {
+					ch <- fmt.Sprintf("\x1b[38;05;%sm%s\x1b[0m", short, imtext.GetText())
+				}
 			}
-		}
-		buffer += "\n"
+			ch <- "\n"
 
-		if err := iterator.SyncIterator(); err != nil {
-			return "", fmt.Errorf("convert error: %s", err)
-		}
+			if err := iterator.SyncIterator(); err != nil {
+				stop <- fmt.Errorf("convert error: %s", err)
+			}
+
+		}()
+	}
+
+	select {
+	case s := <-ch:
+		buffer += s
+	case e := <-stop:
+		return "", e
 	}
 
 	return buffer, nil
