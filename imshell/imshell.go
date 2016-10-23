@@ -5,6 +5,7 @@ import (
 	"gopkg.in/gographics/imagick.v2/imagick"
 	"math"
 	"strconv"
+	"sync"
 )
 
 type Hex string
@@ -361,8 +362,6 @@ func createDict() map[string]string {
 }
 
 func Convert(imagePath, replaceText string, width float64) (string, error) {
-	ch, stop := make(chan string), make(chan error)
-	var buffer string
 
 	imtext := NewImageText(replaceText)
 
@@ -392,44 +391,71 @@ func Convert(imagePath, replaceText string, width float64) (string, error) {
 
 	var wg sync.WaitGroup
 
-	for y := 0; y < int(height); y++ {
+	ch := make(chan string, int(height))
+	quit := make(chan bool, 1)
+	stop := make(chan error, 1)
 
-		go func() {
+	go func() {
 
-			pixels := iterator.GetNextIteratorRow()
-			if len(pixels) == 0 {
-				stop <- fmt.Errorf("convert error: %s", "unverified pixel")
-			}
+		for y := 0; y < int(height); y++ {
 
-			for _, pixel := range pixels {
-				if !pixel.IsVerified() {
+			fmt.Println("y")
+			wg.Add(1)
+			go func() {
+
+				var buffer string
+
+				pixels := iterator.GetNextIteratorRow()
+				if len(pixels) == 0 {
 					stop <- fmt.Errorf("convert error: %s", "unverified pixel")
 				}
-				r := (uint8)(255 * pixel.GetRed())
-				g := (uint8)(255 * pixel.GetGreen())
-				b := (uint8)(255 * pixel.GetBlue())
-				short := RGBToShort(r, g, b)
 
-				if replaceText == "" {
-					ch <- fmt.Sprintf("\x1b[48;05;%sm  \x1b[0m", short)
-				} else {
-					ch <- fmt.Sprintf("\x1b[38;05;%sm%s\x1b[0m", short, imtext.GetText())
+				for _, pixel := range pixels {
+					if !pixel.IsVerified() {
+						stop <- fmt.Errorf("convert error: %s", "unverified pixel")
+					}
+					r := (uint8)(255 * pixel.GetRed())
+					g := (uint8)(255 * pixel.GetGreen())
+					b := (uint8)(255 * pixel.GetBlue())
+					short := RGBToShort(r, g, b)
+
+					if replaceText == "" {
+						buffer += fmt.Sprintf("\x1b[48;05;%sm  \x1b[0m", short)
+					} else {
+						buffer += fmt.Sprintf("\x1b[38;05;%sm%s\x1b[0m", short, imtext.GetText())
+					}
 				}
-			}
-			ch <- "\n"
+				buffer += "\n"
 
-			if err := iterator.SyncIterator(); err != nil {
-				stop <- fmt.Errorf("convert error: %s", err)
-			}
+				if err := iterator.SyncIterator(); err != nil {
+					stop <- fmt.Errorf("convert error: %s", err)
+				}
 
-		}()
-	}
+				ch <- "x"
 
-	select {
-	case s := <-ch:
-		buffer += s
-	case e := <-stop:
-		return "", e
+				wg.Done()
+			}()
+		}
+
+		fmt.Println("Wait")
+		wg.Wait()
+		fmt.Println("Wait end")
+		quit <- true
+	}()
+
+	var buffer string
+
+loop:
+	for {
+		select {
+		case s := <-ch:
+			buffer += s
+		case <-quit:
+			fmt.Println("Quit")
+			break loop
+		case e := <-stop:
+			return "", e
+		}
 	}
 
 	return buffer, nil
