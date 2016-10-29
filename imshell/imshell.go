@@ -8,8 +8,10 @@ import (
 	"sync"
 )
 
+// Hex color code
 type Hex string
 
+// ImageText replace text
 type ImageText struct {
 	text  []rune
 	index int
@@ -21,7 +23,7 @@ func NewImageText(replaceText string) *ImageText {
 
 func (t *ImageText) GetText() string {
 	s1 := string(t.text[t.index])
-	t.index += 1
+	t.index++
 
 	if t.index == len(t.text) {
 		t.index = 0
@@ -35,7 +37,7 @@ func (t *ImageText) GetText() string {
 	if len(b1) < 3 {
 		if len(b2) < 3 {
 			s1 += s2
-			t.index += 1
+			t.index++
 			if t.index == len(t.text) {
 				t.index = 0
 			}
@@ -389,9 +391,10 @@ func Convert(imagePath, replaceText string, width float64) (string, error) {
 	iterator := originalImage.NewPixelIterator()
 	defer iterator.Destroy()
 
-	var wg sync.WaitGroup
+	wg := new(sync.WaitGroup)
+	mu := new(sync.Mutex)
 
-	ch := make(chan string, int(height))
+	ch := make(chan string)
 	quit := make(chan bool, 1)
 	stop := make(chan error, 1)
 
@@ -399,13 +402,15 @@ func Convert(imagePath, replaceText string, width float64) (string, error) {
 
 		for y := 0; y < int(height); y++ {
 
-			fmt.Println("y")
 			wg.Add(1)
 			go func() {
+				mu.Lock()
 
+				defer wg.Done()
 				var buffer string
 
 				pixels := iterator.GetNextIteratorRow()
+
 				if len(pixels) == 0 {
 					stop <- fmt.Errorf("convert error: %s", "unverified pixel")
 				}
@@ -414,6 +419,7 @@ func Convert(imagePath, replaceText string, width float64) (string, error) {
 					if !pixel.IsVerified() {
 						stop <- fmt.Errorf("convert error: %s", "unverified pixel")
 					}
+
 					r := (uint8)(255 * pixel.GetRed())
 					g := (uint8)(255 * pixel.GetGreen())
 					b := (uint8)(255 * pixel.GetBlue())
@@ -431,15 +437,12 @@ func Convert(imagePath, replaceText string, width float64) (string, error) {
 					stop <- fmt.Errorf("convert error: %s", err)
 				}
 
-				ch <- "x"
-
-				wg.Done()
+				ch <- buffer
+				mu.Unlock()
 			}()
 		}
 
-		fmt.Println("Wait")
 		wg.Wait()
-		fmt.Println("Wait end")
 		quit <- true
 	}()
 
@@ -451,7 +454,6 @@ loop:
 		case s := <-ch:
 			buffer += s
 		case <-quit:
-			fmt.Println("Quit")
 			break loop
 		case e := <-stop:
 			return "", e
