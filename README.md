@@ -1,6 +1,6 @@
 # imshell
 
-Displaying an image on the terminal.
+Convert image to viewable on the terminal
 
 ## Install
 
