@@ -5,10 +5,13 @@ import (
 	"gopkg.in/gographics/imagick.v2/imagick"
 	"math"
 	"strconv"
+	"sync"
 )
 
+// Hex color code
 type Hex string
 
+// ImageText replace text
 type ImageText struct {
 	text  []rune
 	index int
@@ -20,7 +23,7 @@ func NewImageText(replaceText string) *ImageText {
 
 func (t *ImageText) GetText() string {
 	s1 := string(t.text[t.index])
-	t.index += 1
+	t.index++
 
 	if t.index == len(t.text) {
 		t.index = 0
@@ -34,7 +37,7 @@ func (t *ImageText) GetText() string {
 	if len(b1) < 3 {
 		if len(b2) < 3 {
 			s1 += s2
-			t.index += 1
+			t.index++
 			if t.index == len(t.text) {
 				t.index = 0
 			}
@@ -361,7 +364,6 @@ func createDict() map[string]string {
 }
 
 func Convert(imagePath, replaceText string, width float64) (string, error) {
-	var buffer string
 
 	imtext := NewImageText(replaceText)
 
@@ -389,32 +391,72 @@ func Convert(imagePath, replaceText string, width float64) (string, error) {
 	iterator := originalImage.NewPixelIterator()
 	defer iterator.Destroy()
 
-	for y := 0; y < int(height); y++ {
+	wg := new(sync.WaitGroup)
+	mu := new(sync.Mutex)
 
-		pixels := iterator.GetNextIteratorRow()
-		if len(pixels) == 0 {
-			break
+	ch := make(chan string)
+	quit := make(chan bool, 1)
+	stop := make(chan error, 1)
+
+	go func() {
+
+		for y := 0; y < int(height); y++ {
+
+			wg.Add(1)
+			go func() {
+				mu.Lock()
+
+				defer wg.Done()
+				var buffer string
+
+				pixels := iterator.GetNextIteratorRow()
+
+				if len(pixels) == 0 {
+					stop <- fmt.Errorf("convert error: %s", "unverified pixel")
+				}
+
+				for _, pixel := range pixels {
+					if !pixel.IsVerified() {
+						stop <- fmt.Errorf("convert error: %s", "unverified pixel")
+					}
+
+					r := (uint8)(255 * pixel.GetRed())
+					g := (uint8)(255 * pixel.GetGreen())
+					b := (uint8)(255 * pixel.GetBlue())
+					short := RGBToShort(r, g, b)
+
+					if replaceText == "" {
+						buffer += fmt.Sprintf("\x1b[48;05;%sm  \x1b[0m", short)
+					} else {
+						buffer += fmt.Sprintf("\x1b[38;05;%sm%s\x1b[0m", short, imtext.GetText())
+					}
+				}
+				buffer += "\n"
+
+				if err := iterator.SyncIterator(); err != nil {
+					stop <- fmt.Errorf("convert error: %s", err)
+				}
+
+				ch <- buffer
+				mu.Unlock()
+			}()
 		}
 
-		for _, pixel := range pixels {
-			if !pixel.IsVerified() {
-				return "", fmt.Errorf("convert error: %s", "unverified pixel")
-			}
-			r := (uint8)(255 * pixel.GetRed())
-			g := (uint8)(255 * pixel.GetGreen())
-			b := (uint8)(255 * pixel.GetBlue())
-			short := RGBToShort(r, g, b)
+		wg.Wait()
+		quit <- true
+	}()
 
-			if replaceText == "" {
-				buffer += fmt.Sprintf("\x1b[48;05;%sm  \x1b[0m", short)
-			} else {
-				buffer += fmt.Sprintf("\x1b[38;05;%sm%s\x1b[0m", short, imtext.GetText())
-			}
-		}
-		buffer += "\n"
+	var buffer string
 
-		if err := iterator.SyncIterator(); err != nil {
-			return "", fmt.Errorf("convert error: %s", err)
+loop:
+	for {
+		select {
+		case s := <-ch:
+			buffer += s
+		case <-quit:
+			break loop
+		case e := <-stop:
+			return "", e
 		}
 	}
 
